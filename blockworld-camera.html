@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14171c">
+<title>BlockWorld Camera</title>
+<style>
+:root{--bg:#14171c;--panel:#1d222a;--panel2:#262c36;--line:#323a47;--text:#eef2f7;--dim:#9aa6b6;--green:#5fcf4d;--green2:#3d9c31;--red:#e5533d;--amber:#f2b632}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow:hidden}
+#app{display:flex;flex-direction:column;height:100vh;height:100dvh;max-width:100vw}
+header{display:flex;align-items:center;gap:10px;padding:8px 12px;padding-top:max(8px,env(safe-area-inset-top));background:var(--panel);border-bottom:3px solid #000}
+.logo{width:26px;height:26px;display:grid;grid-template-columns:1fr 1fr;gap:2px;flex:none}
+.logo i{background:var(--green);display:block}.logo i:nth-child(2){background:#8b5a2b}.logo i:nth-child(3){background:#8b5a2b}.logo i:nth-child(4){background:#6b6f78}
+header h1{font-size:17px;margin:0;letter-spacing:.5px;flex:1}
+header small{color:var(--dim);font-size:11px}
+#main{flex:1;display:flex;flex-direction:column;min-height:0}
+#stage{position:relative;flex:1;min-height:0;background:#000;display:flex;align-items:center;justify-content:center;overflow:hidden}
+#out{width:100%;height:100%;display:block;image-rendering:pixelated;image-rendering:crisp-edges}
+#video{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+#overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;text-align:center;background:linear-gradient(#14171ccc,#14171cf2)}
+#overlay.hidden{display:none}
+#overlay h2{margin:0;font-size:20px}
+#overlay p{margin:0;color:var(--dim);font-size:14px;line-height:1.45;max-width:420px}
+#overlay p.err{color:#ff9b8a}
+.spinner{width:34px;height:34px;border:5px solid var(--line);border-top-color:var(--green);animation:spin 1s steps(8) infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spinner{animation:none}}
+#hud{position:absolute;left:8px;top:8px;display:flex;gap:6px;flex-wrap:wrap;pointer-events:none}
+.chip{background:#000a;border:1px solid #fff2;color:#fff;font-size:11px;padding:3px 7px;font-variant-numeric:tabular-nums}
+.chip.rec{background:var(--red);border-color:var(--red)}
+#stageBtns{position:absolute;right:8px;top:8px;display:flex;flex-direction:column;gap:8px}
+#panel{background:var(--panel);border-top:3px solid #000;padding:10px 12px;padding-bottom:max(10px,env(safe-area-inset-bottom));max-height:46vh;overflow-y:auto;overscroll-behavior:contain}
+.row{display:flex;gap:8px;margin-bottom:10px}
+.row>*{flex:1}
+button,select{font:inherit;color:var(--text);background:var(--panel2);border:2px solid var(--line);border-bottom-width:4px;min-height:46px;padding:6px 10px;font-weight:600;font-size:14px;touch-action:manipulation;cursor:pointer;border-radius:0}
+button:active:not(:disabled){transform:translateY(2px);border-bottom-width:2px}
+button:disabled{opacity:.4;cursor:not-allowed}
+button.primary{background:var(--green2);border-color:var(--green);color:#fff}
+button.danger{background:#8d2f20;border-color:var(--red)}
+button.icon{min-height:44px;min-width:44px;flex:none;padding:6px 10px;background:#000a;border-color:#fff3}
+button.on{background:var(--amber);color:#111;border-color:#ffd978}
+select{width:100%;appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--dim) 50%),linear-gradient(135deg,var(--dim) 50%,transparent 50%);background-position:calc(100% - 18px) 50%,calc(100% - 12px) 50%;background-size:6px 6px;background-repeat:no-repeat;padding-right:30px}
+label.ctl{display:block;margin-bottom:8px;font-size:13px;color:var(--dim)}
+label.ctl span{display:flex;justify-content:space-between;margin-bottom:2px}
+label.ctl b{color:var(--text);font-variant-numeric:tabular-nums}
+input[type=range]{width:100%;height:32px;accent-color:var(--green);margin:0}
+#msg{font-size:12px;min-height:16px;margin:0 0 8px;color:var(--dim)}
+#msg.err{color:#ff9b8a}#msg.ok{color:var(--green)}
+.privacy{font-size:11px;color:var(--dim);line-height:1.4;margin:8px 0 0}
+@media (orientation:landscape) and (max-height:520px){
+ #main{flex-direction:row}#panel{width:min(46vw,380px);max-height:none;border-top:0;border-left:3px solid #000}
+ header small{display:none}
+}
+</style>
+</head>
+<body>
+<div id="app">
+ <header>
+  <div class="logo" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+  <h1>BlockWorld Camera</h1><small>Live block-style camera</small>
+ </header>
+ <div id="main">
+  <div id="stage">
+   <canvas id="out" aria-label="Processed camera view"></canvas>
+   <video id="video" playsinline muted autoplay></video>
+   <div id="hud"><span class="chip" id="chipStyle"></span><span class="chip" id="chipFps">-- fps</span><span class="chip rec" id="chipRec" hidden>● REC 0:00</span></div>
+   <div id="stageBtns">
+    <button class="icon" id="btnSwitch" title="Switch camera" hidden>🔄</button>
+    <button class="icon" id="btnFull" title="Fullscreen" hidden>⛶</button>
+   </div>
+   <div id="overlay">
+    <h2 id="ovTitle">Turn the world into blocks</h2>
+    <p id="ovText">Tap Start Camera and point your phone at anything. Everything is processed on your device — nothing is uploaded.</p>
+    <div class="spinner" id="spin" hidden></div>
+    <button class="primary" id="btnStartBig" style="min-width:200px;min-height:54px;font-size:16px">▶ Start Camera</button>
+    <p id="ovHint">Camera access needs HTTPS or localhost. Opening this file directly (file://) may not work on every Android browser.</p>
+   </div>
+  </div>
+  <div id="panel">
+   <div class="row">
+    <button class="primary" id="btnStart">▶ Start</button>
+    <button class="danger" id="btnStop" disabled>■ Stop</button>
+    <button id="btnCompare" disabled>👁 Original</button>
+   </div>
+   <p id="msg"></p>
+   <div class="row">
+    <div><select id="selStyle" aria-label="Visual style">
+     <option value="classic">Classic Blocks</option><option value="forest">Forest World</option><option value="desert">Desert World</option>
+     <option value="night">Night World</option><option value="candy">Candy World</option><option value="mono">Monochrome Blocks</option></select></div>
+    <div><select id="selQuality" aria-label="Quality">
+     <option value="auto">Quality: AUTO</option><option value="low">Quality: LOW</option><option value="balanced">Quality: BALANCED</option><option value="high">Quality: HIGH</option></select></div>
+   </div>
+   <label class="ctl"><span>Block Size <b id="vBlock"></b></span><input type="range" id="rBlock" min="4" max="40" step="1"></label>
+   <label class="ctl"><span>Color Intensity <b id="vColor"></b></span><input type="range" id="rColor" min="0" max="200" step="5"></label>
+   <label class="ctl"><span>Contrast <b id="vContrast"></b></span><input type="range" id="rContrast" min="50" max="200" step="5"></label>
+   <div class="row">
+    <button id="btnPhoto" disabled>📷 Photo</button>
+    <button id="btnRec" disabled>⏺ Record</button>
+    <button id="btnReset">↺ Reset</button>
+   </div>
+   <p class="privacy">🔒 Camera frames are processed locally in your browser. Nothing is uploaded, tracked or stored unless you save a photo or video yourself.</p>
+  </div>
+ </div>
+</div>
+
+<script>
+"use strict";
+/* ============ Config ============ */
+const DEFAULTS = { block: 10, color: 110, contrast: 115, style: "classic", quality: "auto" };
+const STYLES = {
+  classic:{label:"Classic Blocks",gain:[1,1,1],sat:1.15,con:1.0,levels:8,mono:false,bias:0},
+  forest:{label:"Forest World",gain:[.88,1.15,.82],sat:1.35,con:1.05,levels:7,mono:false,bias:-6},
+  desert:{label:"Desert World",gain:[1.2,1.0,.7],sat:1.2,con:1.0,levels:7,mono:false,bias:8},
+  night:{label:"Night World",gain:[.65,.8,1.3],sat:.9,con:1.35,levels:6,mono:false,bias:-30},
+  candy:{label:"Candy World",gain:[1.1,.95,1.15],sat:1.9,con:1.1,levels:5,mono:false,bias:14},
+  mono:{label:"Monochrome Blocks",gain:[1,1,1],sat:0,con:1.15,levels:5,mono:true,bias:0}
+};
+const QUALITY = {
+  low:{long:480,fps:20}, balanced:{long:720,fps:30}, high:{long:1080,fps:60}
+};
+const QUALITY_ORDER = ["low","balanced","high"];
+
+/* ============ State ============ */
+const $ = id => document.getElementById(id);
+const el = {
+  video:$("video"), out:$("out"), stage:$("stage"), overlay:$("overlay"), ovTitle:$("ovTitle"), ovText:$("ovText"), ovHint:$("ovHint"), spin:$("spin"),
+  btnStartBig:$("btnStartBig"), btnStart:$("btnStart"), btnStop:$("btnStop"), btnSwitch:$("btnSwitch"), btnFull:$("btnFull"), btnCompare:$("btnCompare"),
+  btnPhoto:$("btnPhoto"), btnRec:$("btnRec"), btnReset:$("btnReset"), selStyle:$("selStyle"), selQuality:$("selQuality"),
+  rBlock:$("rBlock"), rColor:$("rColor"), rContrast:$("rContrast"), vBlock:$("vBlock"), vColor:$("vColor"), vContrast:$("vContrast"),
+  msg:$("msg"), chipStyle:$("chipStyle"), chipFps:$("chipFps"), chipRec:$("chipRec")
+};
+const settings = Object.assign({}, DEFAULTS);
+const state = { stream:null, facing:"environment", running:false, showOriginal:false, rafId:0, lastFrame:0, starting:false,
+  autoLevel:1, autoSamples:[], autoCooldown:0, fpsCount:0, fpsTime:0, recorder:null, recChunks:[], recStart:0, recTimer:0, recMime:"" };
+const outCtx = el.out.getContext("2d", { alpha:false });
+const small = document.createElement("canvas");
+const smallCtx = small.getContext("2d", { willReadFrequently:true });
+
+/* ============ UI helpers ============ */
+function setMsg(text, kind){ el.msg.textContent = text || ""; el.msg.className = kind || ""; }
+function showOverlay(title, text, opts){
+  opts = opts || {};
+  el.ovTitle.textContent = title; el.ovText.textContent = text; el.ovText.className = opts.error ? "err" : "";
+  el.spin.hidden = !opts.loading; el.btnStartBig.hidden = !!opts.loading;
+  el.btnStartBig.textContent = opts.btn || "▶ Start Camera";
+  el.ovHint.hidden = !opts.hint; el.overlay.classList.remove("hidden");
+}
+function hideOverlay(){ el.overlay.classList.add("hidden"); }
+function refreshButtons(){
+  const on = state.running;
+  el.btnStart.disabled = on || state.starting; el.btnStop.disabled = !on && !state.starting;
+  el.btnCompare.disabled = !on; el.btnPhoto.disabled = !on; el.btnRec.disabled = !on || !recordingSupported();
+  el.btnRec.textContent = state.recorder ? "⏹ Stop Rec" : "⏺ Record";
+  el.btnRec.classList.toggle("on", !!state.recorder);
+  el.btnCompare.textContent = state.showOriginal ? "🧱 Blocks" : "👁 Original";
+  el.btnCompare.classList.toggle("on", state.showOriginal);
+}
+function updateLabels(){
+  el.vBlock.textContent = settings.block; el.vColor.textContent = settings.color + "%"; el.vContrast.textContent = settings.contrast + "%";
+  el.chipStyle.textContent = STYLES[settings.style].label;
+}
+function applySettingsToUI(){
+  el.rBlock.value = settings.block; el.rColor.value = settings.color; el.rContrast.value = settings.contrast;
+  el.selStyle.value = settings.style; el.selQuality.value = settings.quality; updateLabels();
+}
+
+/* ============ Camera ============ */
+function cameraSupported(){ return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia); }
+function stopTracks(){ if(state.stream){ state.stream.getTracks().forEach(t=>t.stop()); state.stream=null; } el.video.srcObject=null; }
+function describeCameraError(e){
+  const n = e && e.name;
+  if(n==="NotAllowedError"||n==="SecurityError") return "Camera permission was denied. Allow camera access in your browser's site settings, then tap Start Camera again.";
+  if(n==="NotFoundError"||n==="OverconstrainedError") return "No suitable camera was found on this device.";
+  if(n==="NotReadableError"||n==="AbortError") return "The camera is already in use by another app or tab. Close it and try again.";
+  return "The camera could not start" + (e && e.message ? " ("+e.message+")" : "") + ".";
+}
+async function startCamera(){
+  if(state.starting || state.running) return;
+  if(!cameraSupported()){
+    const why = window.isSecureContext ? "This browser does not support camera access." : "Camera access needs a secure page. Open this file via HTTPS or localhost.";
+    showOverlay("Camera unavailable", why, {error:true, hint:true, btn:"Try again"}); setMsg(why,"err"); return;
+  }
+  state.starting = true; refreshButtons(); setMsg("");
+  showOverlay("Starting camera…","Allow camera access if your browser asks.",{loading:true});
+  try{
+    stopTracks();
+    let stream;
+    try{
+      stream = await navigator.mediaDevices.getUserMedia({ audio:false, video:{ facingMode:{ideal:state.facing}, width:{ideal:1280}, height:{ideal:720} } });
+    }catch(e1){
+      if(e1 && e1.name==="OverconstrainedError") stream = await navigator.mediaDevices.getUserMedia({audio:false, video:true}); else throw e1;
+    }
+    state.stream = stream; el.video.srcObject = stream;
+    await Promise.race([ el.video.play(), new Promise((_,rej)=>setTimeout(()=>rej(new Error("Camera timed out")),8000)) ]);
+    const t = stream.getVideoTracks()[0]; const s = t && t.getSettings ? t.getSettings() : {};
+    if(s.facingMode) state.facing = s.facingMode;
+    state.running = true; state.starting = false; hideOverlay(); refreshButtons(); setMsg("Camera running.","ok");
+    detectCameras(); resizeCanvas(); startLoop();
+  }catch(e){
+    state.starting=false; state.running=false; stopTracks();
+    const text = describeCameraError(e);
+    showOverlay("Camera problem", text, {error:true, hint:true, btn:"Try again"}); setMsg(text,"err"); refreshButtons();
+  }
+}
+function stopCamera(){
+  if(state.recorder) stopRecording();
+  cancelAnimationFrame(state.rafId); state.rafId=0; state.running=false; state.starting=false; stopTracks();
+  state.showOriginal=false; el.btnSwitch.hidden=true; el.chipFps.textContent="-- fps";
+  outCtx.fillStyle="#000"; outCtx.fillRect(0,0,el.out.width,el.out.height);
+  showOverlay("Camera stopped","Tap Start Camera to begin again.",{}); refreshButtons(); setMsg("");
+}
+async function switchCamera(){
+  state.facing = state.facing==="environment" ? "user" : "environment";
+  cancelAnimationFrame(state.rafId); state.running=false;
+  if(state.recorder) stopRecording();
+  await startCamera();
+}
+async function detectCameras(){
+  try{
+    const devs = await navigator.mediaDevices.enumerateDevices();
+    el.btnSwitch.hidden = devs.filter(d=>d.kind==="videoinput").length < 2;
+  }catch(e){ el.btnSwitch.hidden = true; }
+}
+
+/* ============ Image processing ============ */
+function currentQuality(){ return settings.quality==="auto" ? QUALITY_ORDER[state.autoLevel] : settings.quality; }
+function resizeCanvas(){
+  const r = el.stage.getBoundingClientRect(); if(r.width<10||r.height<10) return;
+  const q = QUALITY[currentQuality()]; const k = q.long / Math.max(r.width,r.height);
+  const w = Math.max(2, Math.round(r.width*k/2)*2), h = Math.max(2, Math.round(r.height*k/2)*2);
+  if(el.out.width!==w||el.out.height!==h){ el.out.width=w; el.out.height=h; }
+}
+function hash(x,y){ let h = (x*374761393 + y*668265263) | 0; h = (h ^ (h>>>13)) * 1274126177 | 0; return ((h ^ (h>>>16)) & 255)/255; }
+function drawCover(ctx, src, sw, sh, dw, dh, mirror){
+  const sa = sw/sh, da = dw/dh; let cx=0, cy=0, cw=sw, ch=sh;
+  if(sa>da){ cw = sh*da; cx=(sw-cw)/2; } else { ch = sw/da; cy=(sh-ch)/2; }
+  ctx.setTransform(mirror?-1:1,0,0,1,mirror?dw:0,0);
+  ctx.drawImage(src,cx,cy,cw,ch,0,0,dw,dh);
+  ctx.setTransform(1,0,0,1,0,0);
+}
+function renderFrame(){
+  const vw = el.video.videoWidth, vh = el.video.videoHeight; if(!vw||!vh) return;
+  const W = el.out.width, H = el.out.height; const mirror = state.facing==="user";
+  if(state.showOriginal){ outCtx.imageSmoothingEnabled=true; drawCover(outCtx, el.video, vw, vh, W, H, mirror); return; }
+  const cols = Math.max(8, Math.round(480/settings.block)), rows = Math.max(8, Math.round(cols*H/W));
+  if(small.width!==cols||small.height!==rows){ small.width=cols; small.height=rows; }
+  smallCtx.imageSmoothingEnabled = true; smallCtx.imageSmoothingQuality = "medium";
+  drawCover(smallCtx, el.video, vw, vh, cols, rows, mirror);
+  const img = smallCtx.getImageData(0,0,cols,rows), d = img.data;
+  const st = STYLES[settings.style], sat = st.sat * (settings.color/100), con = st.con * (settings.contrast/100);
+  const gr=st.gain[0], gg=st.gain[1], gb=st.gain[2], L=st.levels-1, bias=st.bias, mono=st.mono;
+  for(let y=0,i=0;y<rows;y++){
+    for(let x=0;x<cols;x++,i+=4){
+      let r=d[i]*gr, g=d[i+1]*gg, b=d[i+2]*gb;
+      const lum = 0.299*r+0.587*g+0.114*b;
+      if(mono){ r=g=b=lum; } else { r=lum+(r-lum)*sat; g=lum+(g-lum)*sat; b=lum+(b-lum)*sat; }
+      const n = (hash(x,y)-0.5)*14 + bias; // per-block texture variation
+      r=(r-128)*con+128+n; g=(g-128)*con+128+n; b=(b-128)*con+128+n;
+      r = r<0?0:r>255?255:r; g = g<0?0:g>255?255:g; b = b<0?0:b>255?255:b;
+      d[i]  = Math.round(r/255*L)/L*255;
+      d[i+1]= Math.round(g/255*L)/L*255;
+      d[i+2]= Math.round(b/255*L)/L*255;
+      d[i+3]=255;
+    }
+  }
+  smallCtx.putImageData(img,0,0);
+  outCtx.imageSmoothingEnabled=false;
+  outCtx.drawImage(small,0,0,cols,rows,0,0,W,H);
+  // subtle bevel lines between blocks for a voxel look
+  const bw = W/cols, bh = H/rows; outCtx.lineWidth = Math.max(1, Math.min(bw,bh)*0.08);
+  outCtx.strokeStyle="rgba(0,0,0,0.22)"; outCtx.beginPath();
+  for(let c=1;c<cols;c++){ const x=Math.round(c*bw)+.5; outCtx.moveTo(x,0); outCtx.lineTo(x,H); }
+  for(let r2=1;r2<rows;r2++){ const y=Math.round(r2*bh)+.5; outCtx.moveTo(0,y); outCtx.lineTo(W,y); }
+  outCtx.stroke();
+}
+
+/* ============ Main loop ============ */
+function startLoop(){ cancelAnimationFrame(state.rafId); state.lastFrame=0; state.rafId=requestAnimationFrame(loop); }
+function loop(ts){
+  if(!state.running) return;
+  state.rafId = requestAnimationFrame(loop);
+  const minGap = 1000/QUALITY[currentQuality()].fps - 2;
+  if(ts - state.lastFrame < minGap) return;
+  const t0 = performance.now();
+  try{ renderFrame(); }
+  catch(e){ console.error(e); setMsg("Image processing failed: "+e.message,"err"); state.showOriginal=true; refreshButtons(); }
+  const cost = performance.now()-t0; const gap = ts - state.lastFrame; state.lastFrame = ts;
+  // fps display
+  state.fpsCount++; state.fpsTime += gap;
+  if(state.fpsTime>=1000){ el.chipFps.textContent = Math.round(state.fpsCount*1000/state.fpsTime)+" fps"; state.fpsCount=0; state.fpsTime=0; }
+  if(settings.quality==="auto") autoAdjust(cost, gap);
+}
+function autoAdjust(cost, gap){
+  if(state.autoCooldown>0){ state.autoCooldown--; return; }
+  state.autoSamples.push(Math.max(cost, gap>0?gap*0.6:0));
+  if(state.autoSamples.length<60) return;
+  const avg = state.autoSamples.reduce((a,b)=>a+b,0)/state.autoSamples.length; state.autoSamples.length=0;
+  if(avg>34 && state.autoLevel>0){ state.autoLevel--; state.autoCooldown=90; resizeCanvas(); }
+  else if(avg<11 && state.autoLevel<1){ state.autoLevel++; state.autoCooldown=300; resizeCanvas(); } // conservative: never auto-upgrade past BALANCED
+}
+
+/* ============ Photo ============ */
+function downloadBlob(blob, name){
+  const url = URL.createObjectURL(blob); const a = document.createElement("a");
+  a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),4000);
+}
+function stamp(){ const d=new Date(), p=n=>String(n).padStart(2,"0"); return d.getFullYear()+p(d.getMonth()+1)+p(d.getDate())+"-"+p(d.getHours())+p(d.getMinutes())+p(d.getSeconds()); }
+function capturePhoto(){
+  try{
+    el.out.toBlob(b=>{
+      if(!b){ setMsg("Photo export failed.","err"); return; }
+      downloadBlob(b, "blockworld-"+stamp()+".png"); setMsg("Photo saved as PNG.","ok");
+    }, "image/png");
+  }catch(e){ setMsg("Photo export failed: "+e.message,"err"); }
+}
+
+/* ============ Recording ============ */
+function pickMime(){
+  if(typeof MediaRecorder==="undefined"||!MediaRecorder.isTypeSupported) return "";
+  const list=["video/webm;codecs=vp9","video/webm;codecs=vp8","video/webm","video/mp4"];
+  return list.find(t=>MediaRecorder.isTypeSupported(t)) || "";
+}
+function recordingSupported(){ return typeof MediaRecorder!=="undefined" && typeof el.out.captureStream==="function" && !!pickMime(); }
+function startRecording(){
+  if(!recordingSupported()){ setMsg("Video recording is not supported in this browser.","err"); return; }
+  try{
+    const mime = pickMime(); const stream = el.out.captureStream(30);
+    const rec = new MediaRecorder(stream,{mimeType:mime, videoBitsPerSecond:4000000});
+    state.recChunks=[]; state.recMime=mime;
+    rec.ondataavailable = e=>{ if(e.data && e.data.size) state.recChunks.push(e.data); };
+    rec.onerror = e=>{ setMsg("Recording failed: "+((e.error&&e.error.message)||"unknown error"),"err"); cleanupRecording(); };
+    rec.onstop = ()=>{
+      const chunks = state.recChunks; const type = (state.recMime||"video/webm").split(";")[0];
+      if(chunks.length){ downloadBlob(new Blob(chunks,{type}), "blockworld-"+stamp()+"."+(type.includes("mp4")?"mp4":"webm")); setMsg("Recording saved as "+type.replace("video/","").toUpperCase()+".","ok"); }
+      else setMsg("Recording was empty.","err");
+      cleanupRecording();
+    };
+    rec.start(1000); state.recorder=rec; state.recStart=Date.now();
+    el.chipRec.hidden=false; state.recTimer=setInterval(updateRecTimer,500); updateRecTimer();
+    setMsg("Recording… tap Stop Rec to save."); refreshButtons();
+  }catch(e){ setMsg("Could not start recording: "+e.message,"err"); cleanupRecording(); }
+}
+function stopRecording(){ try{ if(state.recorder && state.recorder.state!=="inactive") state.recorder.stop(); else cleanupRecording(); }catch(e){ setMsg("Could not stop recording: "+e.message,"err"); cleanupRecording(); } }
+function cleanupRecording(){ clearInterval(state.recTimer); state.recorder=null; state.recChunks=[]; el.chipRec.hidden=true; refreshButtons(); }
+function updateRecTimer(){ const s=Math.floor((Date.now()-state.recStart)/1000); el.chipRec.textContent="● REC "+Math.floor(s/60)+":"+String(s%60).padStart(2,"0"); }
+
+/* ============ Fullscreen ============ */
+function fsElement(){ return document.fullscreenElement || document.webkitFullscreenElement; }
+function toggleFullscreen(){
+  try{
+    if(fsElement()){ (document.exitFullscreen||document.webkitExitFullscreen).call(document); return; }
+    const t = el.stage; const req = t.requestFullscreen || t.webkitRequestFullscreen;
+    if(!req){ setMsg("Fullscreen is not available in this browser.","err"); return; }
+    const p = req.call(t); if(p && p.catch) p.catch(()=>setMsg("Fullscreen was blocked by the browser.","err"));
+  }catch(e){ setMsg("Fullscreen is unavailable.","err"); }
+}
+
+/* ============ Events ============ */
+function bind(){
+  el.btnStart.onclick = startCamera; el.btnStartBig.onclick = startCamera; el.btnStop.onclick = stopCamera;
+  el.btnSwitch.onclick = switchCamera; el.btnFull.onclick = toggleFullscreen;
+  el.btnCompare.onclick = ()=>{ state.showOriginal=!state.showOriginal; refreshButtons(); };
+  el.btnPhoto.onclick = capturePhoto; el.btnRec.onclick = ()=> state.recorder ? stopRecording() : startRecording();
+  el.btnReset.onclick = ()=>{ Object.assign(settings,DEFAULTS); state.autoLevel=1; state.autoSamples.length=0; applySettingsToUI(); resizeCanvas(); setMsg("Settings reset to defaults.","ok"); };
+  el.rBlock.oninput = ()=>{ settings.block=+el.rBlock.value; updateLabels(); };
+  el.rColor.oninput = ()=>{ settings.color=+el.rColor.value; updateLabels(); };
+  el.rContrast.oninput = ()=>{ settings.contrast=+el.rContrast.value; updateLabels(); };
+  el.selStyle.onchange = ()=>{ settings.style=el.selStyle.value; updateLabels(); };
+  el.selQuality.onchange = ()=>{ settings.quality=el.selQuality.value; state.autoSamples.length=0; state.autoCooldown=0; resizeCanvas(); };
+  if("ResizeObserver" in window) new ResizeObserver(resizeCanvas).observe(el.stage); else window.addEventListener("resize",resizeCanvas);
+  window.addEventListener("orientationchange",()=>setTimeout(resizeCanvas,300));
+  document.addEventListener("visibilitychange",()=>{
+    if(document.hidden){
+      cancelAnimationFrame(state.rafId); state.rafId=0;
+      if(state.recorder){ stopRecording(); }
+    } else if(state.running){
+      if(state.stream && state.stream.getVideoTracks().some(t=>t.readyState==="ended")){ state.running=false; stopTracks(); showOverlay("Camera stopped","The camera was interrupted while the page was hidden. Tap to restart.",{btn:"▶ Restart Camera"}); refreshButtons(); }
+      else { el.video.play().catch(()=>{}); startLoop(); }
+    }
+  });
+  window.addEventListener("pagehide",()=>{ if(state.recorder) stopRecording(); stopTracks(); });
+  document.addEventListener("fullscreenchange",resizeCanvas); document.addEventListener("webkitfullscreenchange",resizeCanvas);
+}
+function init(){
+  applySettingsToUI(); bind(); resizeCanvas(); refreshButtons();
+  el.btnFull.hidden = !(el.stage.requestFullscreen || el.stage.webkitRequestFullscreen);
+  outCtx.fillStyle="#000"; outCtx.fillRect(0,0,el.out.width,el.out.height);
+  if(!recordingSupported()) el.btnRec.title="Video recording is not supported in this browser";
+  if(!cameraSupported()){
+    const why = window.isSecureContext ? "This browser does not support camera access." : "Camera access needs a secure page. Open this file via HTTPS or localhost.";
+    showOverlay("Camera unavailable", why, {error:true, hint:true, btn:"Try anyway"});
+  }
+}
+init();
+</script>
+</body>
+</html>
